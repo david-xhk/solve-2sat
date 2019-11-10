@@ -5,22 +5,18 @@
 
 2-SAT Solver in Polynomial Time
 
-Using Essentially a DFS Algorithm
+Bonus Implementation: Random Walk Solver
 
-Created on Sat Nov  9 11:22:22 2019
+Created on Sun Nov 10 18:23:13 2019
 
 @author: HKXIE
 """
 
-import io, time
+import io, time, random
 
 
 class My2SATSolver:
-    """
-    2-SAT solver based on strongly-connected components of implication graphs.
-    
-    Based on Tarjan's algorithm to find strongly-connected components.
-    """        
+    """2-SAT solver based on random walk."""        
     
     test_cases = []  
     
@@ -31,6 +27,7 @@ class My2SATSolver:
             self.num_clauses = None
             self.is_sat = None
             self.time_taken = None
+            self.num_steps = None
             self.assignments = None
     
     
@@ -41,6 +38,7 @@ class My2SATSolver:
                   test_case.num_clauses,
                   test_case.is_sat,
                   test_case.time_taken,
+                  test_case.num_steps,
                   sep=",")
     
         
@@ -62,35 +60,29 @@ class My2SATSolver:
         test_case.num_clauses = len(clauses)
         
         start_time = time.time()  # start timing here
-        graph = My2SATSolver.create_graph(clauses)
-        sccs = My2SATSolver.tarjan_scc(graph)
         
-        assignments = {}
-        for scc in sccs:
-            for node in scc:
-                if -node in scc:  # literal and its negation are present
-                    print("FORMULA UNSATISFIABLE")
-                    test_case.is_sat = "UNSAT"
-                    end_time = time.time()
-                    time_taken = end_time-start_time
-                    test_case.time_taken = time_taken
-                    print("time taken: " + format_time(time_taken))
-                    return test_case
-                if node not in assignments:  # assign the literal to true
-                    assignments[node] = 1
-                    assignments[-node] = 0  # and its negation to false
+        result = My2SATSolver.random_walk(var, clauses)
         
         end_time = time.time()  # stop timing here
+        
+        test_case.num_steps = result["num_steps"]
+        
         time_taken = end_time-start_time
-        
-        # sort assignments by increasing order, getting rid of negative literals
-        assignments = {k:assignments[k] for k in sorted(assignments) if k > 0}
-        
-        test_case.is_sat = "SAT"
         test_case.time_taken = time_taken
+        
+        if result["result"] in ("UNSAT", "TIMEOUT"):
+            print("FORMULA UNSATISFIABLE")
+        else:
+            print("FORMULA SATISFIABLE")
+
+        test_case.is_sat = result["result"]
+        
+        # sort assignments by increasing order
+        assignments = result["assignments"]
+        assignments = {k:assignments[k] for k in sorted(assignments)}
+
         test_case.assignments = assignments
         
-        print("FORMULA SATISFIABLE")  # print outputs
         print_long(" ".join(map(str, assignments.values())))
         print("time taken: " + format_time(time_taken))
         
@@ -217,96 +209,59 @@ class My2SATSolver:
                   str(len(clauses)) + " clauses")
 
         return var, clauses
-        
+
     
     @staticmethod
-    def create_graph(clauses):
-        """
-        Takes in a set of clauses and outputs the adjacency list 
-        of the implication graph which can be formed with the clauses.
+    def random_walk(var, clauses, k=100, timeout=60):
+        assignments = dict.fromkeys(var, 0)
         
-        Input: list of 1-tuples or 2-tuples [(a,), (b,c), ...]
-        Output: dict of int mapped to list of int {a:[b], c:[d,e], ...}
-        """
-        graph = {}
+        def calculate_truth(clause):
+            for literal in clause:
+                if literal > 0:
+                    if assignments[literal] == 1:
+                        return 1
+                elif assignments[-literal] == 0:
+                    return 1
+            return 0
         
-        for clause in clauses:
-            if len(clause) == 2:
-                a, b = clause
-            else:  # length 1
-                a = b = clause[0]
-            
-            if -a not in graph:  # initialize adjacency list of node
-                graph[-a] = []
-            if b not in graph[-a]:  # prevent duplicate successors
-                graph[-a].append(b)
-            
-            if -b not in graph:
-                graph[-b] = []
-            if a not in graph[-b]:
-                graph[-b].append(a)
-            
-        return graph
-    
-    
-    @staticmethod
-    def tarjan_scc(graph):
-        """
-        Tarjan's Algorithm (named for its discoverer, Robert Tarjan) is a 
-        graph theory algorithm for finding the strongly connected components
-        of a graph.
+        def flip(literal):
+            assignments[abs(literal)] = 1-assignments[abs(literal)]
         
-        Based on: http://www.logarithmic.net/pfh/blog/01208083168
-        """
-        # initialize variables
-        index_ctr = [0]
-        lowlinks = {}
-        index = {}
-        stack = []
-        sccs = [] 
-                
-        def DFS_visit(node):      
-            index[node] = index_ctr[0]
-            lowlinks[node] = index_ctr[0] # initialize lowlink to index
-            index_ctr[0] += 1
-            stack.append(node)
-            
-            try:
-                successors = graph[node]
-            except:
-                successors = []
-            
-            for successor in successors:
-                # tree edge: visit and update lowlinks
-                if successor not in lowlinks:
-                    DFS_visit(successor)
-                    lowlinks[node] = min(lowlinks[node],lowlinks[successor])
-                
-                 # back edge: don't visit, but compare its index with lowlink
-                elif successor in stack:
-                    lowlinks[node] = min(lowlinks[node],index[successor])
-                
-                # cross edge: ignore. move on to next successor
+        num_var = len(var)
+        is_timeout = False
+        start_time = time.time()
+        for num_steps in range(k*num_var**2):
+            if time.time()-start_time > timeout:  # check for timeout
+                is_timeout = True
+                break
+            is_unsat = False  # reset flag
+            for clause in clauses:  # find a bad clause
+                if calculate_truth(clause) == 0:
+                    is_unsat = True
+                    bad_clause = clause
+                    break
+            if is_unsat:  # choose a random literal
+                if len(bad_clause) == 1:
+                    literal = bad_clause[0]
+                elif random.random() > 0.5:
+                    literal = bad_clause[0]
                 else:
-                    continue
-                    
-            # root node to SCC found. pop SCC off stack.
-            if lowlinks[node] == index[node]:
-                scc = []
-                
-                while True:
-                    successor = stack.pop()
-                    scc.append(successor)
-                    if successor == node: break
-                
-                sccs.append(tuple(scc))
+                    literal = bad_clause[1]
+                flip(literal)  # and flip it
+            else:
+                break
         
-        # visit all unvisited nodes
-        for node in graph:
-            if node not in lowlinks:
-                DFS_visit(node)
-        
-        return sccs
+        result = {"num_steps":num_steps+1}
+        if not is_unsat:
+            result["assignments"] = assignments
+            result["result"] = "SAT"
+        else:
+            result["assignments"] = {}
+            if is_timeout:
+                result["result"] = "TIMEOUT"
+            elif is_unsat:
+                result["result"] = "UNSAT"
+        return result
 
 
 def format_time(time_taken):
